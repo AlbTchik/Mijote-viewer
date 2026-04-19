@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chargement — Mijote</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; margin: 0; background: #f7fbf7; }
+    .state { text-align: center; color: #5a7a5a; padding: 2rem; }
+    .spinner { width: 36px; height: 36px; border: 3px solid #d1e7d1;
+               border-top-color: #4a8c4a; border-radius: 50%;
+               animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: #c00; }
+    a { color: #4a8c4a; }
+  </style>
+</head>
+<body>
+<div class="state" id="state">
+  <div class="spinner"></div>
+  <p>Chargement de la liste…</p>
+</div>
+
+<script>
+(function () {
+  const p = new URLSearchParams(location.search)
+  const instId = p.get('i')
+  const dbUrl  = (p.get('db') || '').replace(/\/$/, '')
+  const planId = p.get('plan') || p.get('p')
+
+  function err(msg) {
+    document.getElementById('state').innerHTML =
+      '<p class="error"><strong>' + msg + '</strong></p>'
+  }
+
+  if (!instId || !dbUrl) {
+    err('Lien invalide — paramètres manquants.')
+    return
+  }
+
+  async function load() {
+    // Si plan ID fourni : charger directement ; sinon lire le pointeur current
+    let pid = planId
+    if (!pid) {
+      const r = await fetch(dbUrl + '/shopping/' + instId + '/current.json')
+      if (!r.ok) throw new Error('current introuvable')
+      pid = await r.json()
+      if (!pid) throw new Error('aucun plan publié')
+    }
+
+    // Charger le HTML stocké dans Firebase (chemin séparé des items)
+    const r2 = await fetch(dbUrl + '/sharing/' + instId + '/' + pid + '.json')
+    if (!r2.ok) throw new Error('HTML introuvable (HTTP ' + r2.status + ')')
+    const html = await r2.json()
+    if (typeof html !== 'string' || !html) throw new Error('HTML vide ou invalide')
+
+    // Injecter le HTML dans un iframe — plus fiable que document.write
+    // sur mobile (scripts exécutés correctement, pas de restrictions async)
+    const iframe = document.createElement('iframe')
+    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+    iframe.style = 'border:none;position:fixed;top:0;left:0;width:100%;height:100%'
+    document.body.innerHTML = ''
+    document.body.style = 'margin:0;padding:0;overflow:hidden'
+    document.body.appendChild(iframe)
+    iframe.srcdoc = html
+  }
+
+  load().catch(function (e) {
+    err('Impossible de charger la liste : ' + e.message)
+  })
+})()
+</script>
+</body>
+</html>
