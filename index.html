@@ -20,9 +20,9 @@
     /* ── Iframe ── */
     #frame { border: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: none; }
 
-    /* ── Menu toggle button ── */
+    /* ── Menu toggle button — sous la toolbar (48px) + nav (50px) ── */
     #menuToggle {
-      position: fixed; top: 12px; left: 12px; z-index: 3000;
+      position: fixed; top: 106px; left: 12px; z-index: 3000;
       width: 38px; height: 38px;
       background: #2d5016; color: #fff; border: none; border-radius: 8px;
       cursor: pointer; font-size: 1.1rem; display: none;
@@ -148,10 +148,11 @@
   const p       = new URLSearchParams(location.search)
   const instId  = p.get('i')
   const dbUrl   = (p.get('db') || '').replace(/\/$/, '')
-  const initPid = p.get('plan') || p.get('p')
+  // Nouveau format : ?sk=shareKey  — ancien format : ?p=planId (compat)
+  const initSk  = p.get('sk') || p.get('plan') || p.get('p')
 
-  let currentPid = null
-  let history    = {}   // { planId: { name, publishedAt, isFavorite } }
+  let currentSk = null
+  let history   = {}   // { shareKey: { shareKey, planId, name, publishedAt, isFavorite, contentHash } }
 
   // ── Utilities ─────────────────────────────────────────────────────────────
   function fmtDate(ts) {
@@ -178,13 +179,6 @@
     const r = await fetch(dbUrl + path + '.json?t=' + Date.now())
     if (!r.ok) throw new Error('Firebase GET failed: ' + r.status)
     return r.json()
-  }
-
-  async function fbPut(path, data) {
-    await fetch(dbUrl + path + '.json', {
-      method: 'PUT', body: JSON.stringify(data),
-      headers: { 'Content-Type': 'application/json' }
-    })
   }
 
   async function fbPatch(path, data) {
@@ -217,12 +211,12 @@
   backdrop.addEventListener('click', closeMenu)
 
   // ── Load a plan into iframe ────────────────────────────────────────────────
-  async function loadPlan(pid) {
-    const html = await fbGet('/sharing/' + instId + '/' + pid)
-    if (typeof html !== 'string' || !html) throw new Error('HTML vide pour plan ' + pid)
+  async function loadPlan(sk) {
+    const html = await fbGet('/sharing/' + instId + '/' + sk)
+    if (typeof html !== 'string' || !html) throw new Error('HTML vide pour ' + sk)
     const frame = document.getElementById('frame')
     frame.srcdoc = html
-    currentPid = pid
+    currentSk = sk
     renderMenu()
   }
 
@@ -236,9 +230,37 @@
     }
   }
 
+  // Écoute les changements Firebase en temps réel via SSE
+  function startHistoryStream() {
+    try {
+      const es = new EventSource(dbUrl + '/history/' + instId + '.json')
+      es.addEventListener('put', ev => {
+        try {
+          const { path, data } = JSON.parse(ev.data)
+          if (path === '/') {
+            history = data || {}
+          } else if (data !== null) {
+            history[path.slice(1)] = data
+          } else {
+            delete history[path.slice(1)]
+          }
+          renderMenu()
+        } catch(e) {}
+      })
+      es.addEventListener('patch', ev => {
+        try {
+          const { data } = JSON.parse(ev.data)
+          if (data) Object.assign(history, data)
+          renderMenu()
+        } catch(e) {}
+      })
+    } catch(e) {}
+  }
+
   function sortedPlans() {
-    return Object.values(history)
-      .filter(Boolean)
+    return Object.entries(history)
+      .filter(([, e]) => Boolean(e))
+      .map(([fbKey, e]) => ({ fbKey, ...e }))
       .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))
   }
 
@@ -251,16 +273,17 @@
     }
     list.innerHTML = ''
     for (const plan of plans) {
-      const pid    = String(plan.planId)
-      const isActive = pid === String(currentPid)
-      const isFav  = !!plan.isFavorite
+      // La clé de chargement : shareKey (nouveau) ou planId (ancien)
+      const loadKey  = plan.shareKey || plan.fbKey || String(plan.planId)
+      const isActive = loadKey === currentSk
+      const isFav    = !!plan.isFavorite
 
       const entry = document.createElement('div')
       entry.className = 'plan-entry' + (isActive ? ' active' : '')
 
       entry.innerHTML = `
         <div class="plan-entry-info">
-          <div class="plan-entry-name">${esc(plan.name)}</div>
+          <div class="plan-entry-name">${esc(plan.name || 'Sans nom')}</div>
           <div class="plan-entry-date">${fmtDate(plan.publishedAt)}</div>
         </div>
         <div class="plan-entry-actions">
@@ -272,9 +295,9 @@
       entry.querySelector('.plan-entry-info').addEventListener('click', async () => {
         if (isActive) { closeMenu(); return }
         try {
-          await loadPlan(pid)
+          await loadPlan(loadKey)
           closeMenu()
-          showToast('Planning chargé : ' + plan.name)
+          showToast('Planning chargé : ' + (plan.name || loadKey))
         } catch (e) {
           showToast('Erreur : ' + e.message, 4000)
         }
@@ -284,8 +307,9 @@
       entry.querySelector('.btn-icon.star').addEventListener('click', async (ev) => {
         ev.stopPropagation()
         const newFav = !isFav
-        history[pid] = { ...history[pid], isFavorite: newFav }
-        await fbPatch('/history/' + instId + '/' + pid, { isFavorite: newFav })
+        const fbKey = plan.fbKey
+        if (history[fbKey]) history[fbKey] = { ...history[fbKey], isFavorite: newFav }
+        await fbPatch('/history/' + instId + '/' + fbKey, { isFavorite: newFav })
         renderMenu()
         showToast(newFav ? '⭐ Ajouté aux favoris' : 'Retiré des favoris')
       })
@@ -293,28 +317,28 @@
       // Trash
       entry.querySelector('.btn-icon.trash').addEventListener('click', async (ev) => {
         ev.stopPropagation()
-        if (!confirm('Supprimer "' + plan.name + '" de l\'historique ?')) return
-        await deletePlan(pid)
+        if (!confirm('Supprimer "' + (plan.name || loadKey) + '" de l\'historique ?')) return
+        await deletePlan(plan.fbKey, loadKey)
       })
 
       list.appendChild(entry)
     }
   }
 
-  async function deletePlan(pid) {
-    delete history[pid]
+  async function deletePlan(fbKey, loadKey) {
+    delete history[fbKey]
     await Promise.all([
-      fbDelete('/history/' + instId + '/' + pid),
-      fbDelete('/sharing/' + instId + '/' + pid),
+      fbDelete('/history/' + instId + '/' + fbKey),
+      fbDelete('/sharing/' + instId + '/' + loadKey),
     ])
     renderMenu()
     showToast('Planning supprimé')
-    // If we deleted the current plan, load the next available one
-    if (String(pid) === String(currentPid)) {
+    if (loadKey === currentSk) {
       const next = sortedPlans()[0]
       if (next) {
-        await loadPlan(String(next.planId))
-        showToast('Affichage du planning : ' + next.name)
+        const nextKey = next.shareKey || next.fbKey || String(next.planId)
+        await loadPlan(nextKey)
+        showToast('Affichage du planning : ' + (next.name || nextKey))
       }
     }
   }
@@ -324,7 +348,10 @@
     const toDelete = sortedPlans().filter(p => !p.isFavorite)
     if (toDelete.length === 0) { showToast('Aucun planning non-favori à supprimer'); return }
     if (!confirm('Supprimer ' + toDelete.length + ' planning(s) non-favori(s) ?')) return
-    for (const plan of toDelete) await deletePlan(String(plan.planId))
+    for (const plan of toDelete) {
+      const loadKey = plan.shareKey || plan.fbKey || String(plan.planId)
+      await deletePlan(plan.fbKey, loadKey)
+    }
     showToast(toDelete.length + ' planning(s) supprimé(s)')
   })
 
@@ -337,28 +364,25 @@
   async function init() {
     if (!instId || !dbUrl) { errState('Lien invalide — paramètres manquants.'); return }
 
-    // Load history
     await loadHistory()
 
-    // Determine which plan to show
-    let pid = initPid
-    if (!pid) {
+    // Détermine quel plan afficher
+    let sk = initSk
+    if (!sk) {
       try {
         const cur = await fbGet('/shopping/' + instId + '/current')
-        pid = cur ? String(cur) : null
+        sk = cur ? String(cur) : null
       } catch (e) {}
     }
-    if (!pid) {
-      // Try first plan in history
+    if (!sk) {
       const first = sortedPlans()[0]
-      pid = first ? String(first.planId) : null
+      if (first) sk = first.shareKey || first.fbKey || String(first.planId)
     }
 
-    if (!pid) { errState('Aucun planning publié trouvé.'); return }
+    if (!sk) { errState('Aucun planning publié trouvé.'); return }
 
-    // Load plan content
     try {
-      await loadPlan(pid)
+      await loadPlan(sk)
     } catch (e) {
       errState('Impossible de charger la liste : ' + e.message); return
     }
@@ -367,6 +391,9 @@
     document.getElementById('loadState').style.display = 'none'
     document.getElementById('frame').style.display = 'block'
     menuToggle.style.display = 'flex'
+
+    // Lancer la sync temps-réel de l'historique
+    startHistoryStream()
   }
 
   init()
