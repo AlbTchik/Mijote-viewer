@@ -3,72 +3,373 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chargement — Mijote</title>
+  <title>Liste de Courses — Mijote</title>
   <style>
-    body { font-family: system-ui, sans-serif; display: flex; align-items: center;
-           justify-content: center; min-height: 100vh; margin: 0; background: #f7fbf7; }
-    .state { text-align: center; color: #5a7a5a; padding: 2rem; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f7fbf7; }
+
+    /* ── Loading state ── */
+    #loadState { display: flex; align-items: center; justify-content: center;
+                 min-height: 100vh; flex-direction: column; gap: 1rem; color: #5a7a5a; padding: 2rem; }
     .spinner { width: 36px; height: 36px; border: 3px solid #d1e7d1;
                border-top-color: #4a8c4a; border-radius: 50%;
-               animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
+               animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error { color: #c00; }
-    a { color: #4a8c4a; }
+    .error { color: #c00; text-align: center; }
+
+    /* ── Iframe ── */
+    #frame { border: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+
+    /* ── Menu toggle button ── */
+    #menuToggle {
+      position: fixed; top: 12px; left: 12px; z-index: 3000;
+      width: 38px; height: 38px;
+      background: #2d5016; color: #fff; border: none; border-radius: 8px;
+      cursor: pointer; font-size: 1.1rem; display: none;
+      align-items: center; justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      transition: background 0.15s;
+    }
+    #menuToggle:hover { background: #3a6b1e; }
+
+    /* ── Backdrop ── */
+    #backdrop {
+      position: fixed; inset: 0; z-index: 3500;
+      background: rgba(0,0,0,0.35); display: none;
+    }
+
+    /* ── Side panel ── */
+    #sidePanel {
+      position: fixed; top: 0; left: 0; z-index: 4000;
+      width: 300px; max-width: 90vw; height: 100vh;
+      background: #fff; box-shadow: 4px 0 20px rgba(0,0,0,0.15);
+      display: flex; flex-direction: column;
+      transform: translateX(-100%); transition: transform 0.25s ease;
+    }
+    #sidePanel.open { transform: translateX(0); }
+
+    .panel-header {
+      background: #2d5016; color: #fff;
+      padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .panel-header h2 { font-size: 1rem; font-weight: 700; }
+    .panel-close {
+      background: none; border: none; color: #fff; cursor: pointer;
+      font-size: 1.2rem; padding: 2px 6px; border-radius: 4px;
+    }
+    .panel-close:hover { background: rgba(255,255,255,0.2); }
+
+    .panel-body { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+    .plan-entry {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; cursor: pointer;
+      border-bottom: 1px solid #f0f4ec;
+      transition: background 0.12s;
+    }
+    .plan-entry:hover { background: #f4faf0; }
+    .plan-entry.active { background: #e8f3e0; border-left: 3px solid #2d5016; }
+
+    .plan-entry-info { flex: 1; min-width: 0; }
+    .plan-entry-name { font-size: 0.88rem; font-weight: 600; color: #1a2e0e;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .plan-entry-date { font-size: 0.72rem; color: #6a8a5a; margin-top: 1px; }
+
+    .plan-entry-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .btn-icon {
+      background: none; border: none; cursor: pointer;
+      width: 28px; height: 28px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.9rem; color: #888; transition: background 0.12s, color 0.12s;
+    }
+    .btn-icon:hover { background: #f0f4ec; }
+    .btn-icon.star { color: #c8a800; }
+    .btn-icon.star.active { color: #f0b800; }
+    .btn-icon.trash:hover { background: #fee2e2; color: #dc2626; }
+
+    .panel-empty { padding: 24px 16px; text-align: center; color: #8a9a7a; font-size: 0.88rem; }
+
+    .panel-footer {
+      padding: 12px 14px; border-top: 1px solid #e0ecda; flex-shrink: 0;
+    }
+    .btn-delete-all {
+      width: 100%; padding: 8px; background: #fee2e2; color: #dc2626;
+      border: 1px solid #fca5a5; border-radius: 6px; cursor: pointer;
+      font-size: 0.85rem; font-weight: 600;
+      transition: background 0.12s;
+    }
+    .btn-delete-all:hover { background: #fecaca; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 20px; right: 20px; z-index: 5000;
+      background: #1a2e0e; color: #fff; padding: 10px 16px;
+      border-radius: 8px; font-size: 0.88rem; max-width: 280px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+      opacity: 0; transform: translateY(8px);
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+    }
+    #toast.visible { opacity: 1; transform: translateY(0); }
   </style>
 </head>
 <body>
-<div class="state" id="state">
+
+<div id="loadState">
   <div class="spinner"></div>
   <p>Chargement de la liste…</p>
 </div>
 
+<iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+
+<!-- Menu toggle -->
+<button id="menuToggle" title="Plannings publiés">☰</button>
+
+<!-- Backdrop -->
+<div id="backdrop"></div>
+
+<!-- Side panel -->
+<div id="sidePanel">
+  <div class="panel-header">
+    <h2>📅 Plannings publiés</h2>
+    <button class="panel-close" id="panelClose">✕</button>
+  </div>
+  <div class="panel-body" id="planList"></div>
+  <div class="panel-footer">
+    <button class="btn-delete-all" id="btnDeleteAll">🗑 Supprimer tous les non-favoris</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
 <script>
 (function () {
-  const p = new URLSearchParams(location.search)
-  const instId = p.get('i')
-  const dbUrl  = (p.get('db') || '').replace(/\/$/, '')
-  const planId = p.get('plan') || p.get('p')
+  const p       = new URLSearchParams(location.search)
+  const instId  = p.get('i')
+  const dbUrl   = (p.get('db') || '').replace(/\/$/, '')
+  const initPid = p.get('plan') || p.get('p')
 
-  function err(msg) {
-    document.getElementById('state').innerHTML =
+  let currentPid = null
+  let history    = {}   // { planId: { name, publishedAt, isFavorite } }
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
+  function fmtDate(ts) {
+    if (!ts) return ''
+    const d = new Date(ts)
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit',
+                                           hour: '2-digit', minute: '2-digit' })
+  }
+
+  function showToast(msg, dur) {
+    const el = document.getElementById('toast')
+    el.textContent = msg
+    el.classList.add('visible')
+    setTimeout(() => el.classList.remove('visible'), dur || 3000)
+  }
+
+  function errState(msg) {
+    document.getElementById('loadState').innerHTML =
       '<p class="error"><strong>' + msg + '</strong></p>'
   }
 
-  if (!instId || !dbUrl) {
-    err('Lien invalide — paramètres manquants.')
-    return
+  // ── Firebase REST helpers ──────────────────────────────────────────────────
+  async function fbGet(path) {
+    const r = await fetch(dbUrl + path + '.json?t=' + Date.now())
+    if (!r.ok) throw new Error('Firebase GET failed: ' + r.status)
+    return r.json()
   }
 
-  async function load() {
-    // Si plan ID fourni : charger directement ; sinon lire le pointeur current
-    let pid = planId
+  async function fbPut(path, data) {
+    await fetch(dbUrl + path + '.json', {
+      method: 'PUT', body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+
+  async function fbPatch(path, data) {
+    await fetch(dbUrl + path + '.json', {
+      method: 'PATCH', body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+
+  async function fbDelete(path) {
+    await fetch(dbUrl + path + '.json', { method: 'DELETE' })
+  }
+
+  // ── Menu open/close ────────────────────────────────────────────────────────
+  const sidePanel  = document.getElementById('sidePanel')
+  const backdrop   = document.getElementById('backdrop')
+  const menuToggle = document.getElementById('menuToggle')
+
+  function openMenu() {
+    sidePanel.classList.add('open')
+    backdrop.style.display = 'block'
+  }
+  function closeMenu() {
+    sidePanel.classList.remove('open')
+    backdrop.style.display = 'none'
+  }
+
+  menuToggle.addEventListener('click', openMenu)
+  document.getElementById('panelClose').addEventListener('click', closeMenu)
+  backdrop.addEventListener('click', closeMenu)
+
+  // ── Load a plan into iframe ────────────────────────────────────────────────
+  async function loadPlan(pid) {
+    const html = await fbGet('/sharing/' + instId + '/' + pid)
+    if (typeof html !== 'string' || !html) throw new Error('HTML vide pour plan ' + pid)
+    const frame = document.getElementById('frame')
+    frame.srcdoc = html
+    currentPid = pid
+    renderMenu()
+  }
+
+  // ── History management ─────────────────────────────────────────────────────
+  async function loadHistory() {
+    try {
+      const data = await fbGet('/history/' + instId)
+      history = data || {}
+    } catch (e) {
+      history = {}
+    }
+  }
+
+  function sortedPlans() {
+    return Object.values(history)
+      .filter(Boolean)
+      .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))
+  }
+
+  function renderMenu() {
+    const list = document.getElementById('planList')
+    const plans = sortedPlans()
+    if (plans.length === 0) {
+      list.innerHTML = '<div class="panel-empty">Aucun planning publié</div>'
+      return
+    }
+    list.innerHTML = ''
+    for (const plan of plans) {
+      const pid    = String(plan.planId)
+      const isActive = pid === String(currentPid)
+      const isFav  = !!plan.isFavorite
+
+      const entry = document.createElement('div')
+      entry.className = 'plan-entry' + (isActive ? ' active' : '')
+
+      entry.innerHTML = `
+        <div class="plan-entry-info">
+          <div class="plan-entry-name">${esc(plan.name)}</div>
+          <div class="plan-entry-date">${fmtDate(plan.publishedAt)}</div>
+        </div>
+        <div class="plan-entry-actions">
+          <button class="btn-icon star ${isFav ? 'active' : ''}" title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">★</button>
+          <button class="btn-icon trash" title="Supprimer">🗑</button>
+        </div>`
+
+      // Click on info → switch plan
+      entry.querySelector('.plan-entry-info').addEventListener('click', async () => {
+        if (isActive) { closeMenu(); return }
+        try {
+          await loadPlan(pid)
+          closeMenu()
+          showToast('Planning chargé : ' + plan.name)
+        } catch (e) {
+          showToast('Erreur : ' + e.message, 4000)
+        }
+      })
+
+      // Star toggle
+      entry.querySelector('.btn-icon.star').addEventListener('click', async (ev) => {
+        ev.stopPropagation()
+        const newFav = !isFav
+        history[pid] = { ...history[pid], isFavorite: newFav }
+        await fbPatch('/history/' + instId + '/' + pid, { isFavorite: newFav })
+        renderMenu()
+        showToast(newFav ? '⭐ Ajouté aux favoris' : 'Retiré des favoris')
+      })
+
+      // Trash
+      entry.querySelector('.btn-icon.trash').addEventListener('click', async (ev) => {
+        ev.stopPropagation()
+        if (!confirm('Supprimer "' + plan.name + '" de l\'historique ?')) return
+        await deletePlan(pid)
+      })
+
+      list.appendChild(entry)
+    }
+  }
+
+  async function deletePlan(pid) {
+    delete history[pid]
+    await Promise.all([
+      fbDelete('/history/' + instId + '/' + pid),
+      fbDelete('/sharing/' + instId + '/' + pid),
+    ])
+    renderMenu()
+    showToast('Planning supprimé')
+    // If we deleted the current plan, load the next available one
+    if (String(pid) === String(currentPid)) {
+      const next = sortedPlans()[0]
+      if (next) {
+        await loadPlan(String(next.planId))
+        showToast('Affichage du planning : ' + next.name)
+      }
+    }
+  }
+
+  // Delete all non-favorites
+  document.getElementById('btnDeleteAll').addEventListener('click', async () => {
+    const toDelete = sortedPlans().filter(p => !p.isFavorite)
+    if (toDelete.length === 0) { showToast('Aucun planning non-favori à supprimer'); return }
+    if (!confirm('Supprimer ' + toDelete.length + ' planning(s) non-favori(s) ?')) return
+    for (const plan of toDelete) await deletePlan(String(plan.planId))
+    showToast(toDelete.length + ' planning(s) supprimé(s)')
+  })
+
+  // ── HTML escape ────────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  }
+
+  // ── Main init ──────────────────────────────────────────────────────────────
+  async function init() {
+    if (!instId || !dbUrl) { errState('Lien invalide — paramètres manquants.'); return }
+
+    // Load history
+    await loadHistory()
+
+    // Determine which plan to show
+    let pid = initPid
     if (!pid) {
-      const r = await fetch(dbUrl + '/shopping/' + instId + '/current.json')
-      if (!r.ok) throw new Error('current introuvable')
-      pid = await r.json()
-      if (!pid) throw new Error('aucun plan publié')
+      try {
+        const cur = await fbGet('/shopping/' + instId + '/current')
+        pid = cur ? String(cur) : null
+      } catch (e) {}
+    }
+    if (!pid) {
+      // Try first plan in history
+      const first = sortedPlans()[0]
+      pid = first ? String(first.planId) : null
     }
 
-    // Charger le HTML stocké dans Firebase (chemin séparé des items)
-    const r2 = await fetch(dbUrl + '/sharing/' + instId + '/' + pid + '.json')
-    if (!r2.ok) throw new Error('HTML introuvable (HTTP ' + r2.status + ')')
-    const html = await r2.json()
-    if (typeof html !== 'string' || !html) throw new Error('HTML vide ou invalide')
+    if (!pid) { errState('Aucun planning publié trouvé.'); return }
 
-    // Injecter le HTML dans un iframe — plus fiable que document.write
-    // sur mobile (scripts exécutés correctement, pas de restrictions async)
-    const iframe = document.createElement('iframe')
-    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
-    iframe.style = 'border:none;position:fixed;top:0;left:0;width:100%;height:100%'
-    document.body.innerHTML = ''
-    document.body.style = 'margin:0;padding:0;overflow:hidden'
-    document.body.appendChild(iframe)
-    iframe.srcdoc = html
+    // Load plan content
+    try {
+      await loadPlan(pid)
+    } catch (e) {
+      errState('Impossible de charger la liste : ' + e.message); return
+    }
+
+    // Show UI
+    document.getElementById('loadState').style.display = 'none'
+    document.getElementById('frame').style.display = 'block'
+    menuToggle.style.display = 'flex'
   }
 
-  load().catch(function (e) {
-    err('Impossible de charger la liste : ' + e.message)
-  })
+  init()
 })()
 </script>
 </body>
