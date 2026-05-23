@@ -369,12 +369,7 @@
     // Détermine quel plan afficher
     let sk = initSk
     if (!sk) {
-      try {
-        const cur = await fbGet('/shopping/' + instId + '/current')
-        sk = cur ? String(cur) : null
-      } catch (e) {}
-    }
-    if (!sk) {
+      // Par défaut : planning le plus récemment publié (trié par publishedAt desc)
       const first = sortedPlans()[0]
       if (first) sk = first.shareKey || first.fbKey || String(first.planId)
     }
