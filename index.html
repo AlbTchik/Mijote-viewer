@@ -148,8 +148,6 @@
   const p       = new URLSearchParams(location.search)
   const instId  = p.get('i')
   const dbUrl   = (p.get('db') || '').replace(/\/$/, '')
-  // Nouveau format : ?sk=shareKey  — ancien format : ?p=planId (compat)
-  const initSk  = p.get('sk') || p.get('plan') || p.get('p')
 
   let currentSk = null
   let history   = {}   // { shareKey: { shareKey, planId, name, publishedAt, isFavorite, contentHash } }
@@ -366,13 +364,10 @@
 
     await loadHistory()
 
-    // Détermine quel plan afficher
-    let sk = initSk
-    if (!sk) {
-      // Par défaut : planning le plus récemment publié (trié par publishedAt desc)
-      const first = sortedPlans()[0]
-      if (first) sk = first.shareKey || first.fbKey || String(first.planId)
-    }
+    // Toujours afficher le planning le plus récemment publié à l'arrivée
+    // (les anciens plans restent accessibles via le menu latéral).
+    const first = sortedPlans()[0]
+    const sk = first ? (first.shareKey || first.fbKey || String(first.planId)) : null
 
     if (!sk) { errState('Aucun planning publié trouvé.'); return }
 
