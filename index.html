@@ -148,6 +148,7 @@
   const p       = new URLSearchParams(location.search)
   const instId  = p.get('i')
   const dbUrl   = (p.get('db') || '').replace(/\/$/, '')
+  const urlSk   = p.get('sk')   // clé portée par le lien — seule donnée lisible sans compte
 
   let currentSk = null
   let history   = {}   // { shareKey: { shareKey, planId, name, publishedAt, isFavorite, contentHash } }
@@ -362,12 +363,14 @@
   async function init() {
     if (!instId || !dbUrl) { errState('Lien invalide — paramètres manquants.'); return }
 
-    await loadHistory()
+    // La feuille `sharing/$scope/$sk` est la SEULE donnée lisible sans compte (règles #65/#66).
+    // Le lien porte déjà `sk` : on charge le planning directement par là, sans passer par
+    // `history` — ce chemin exige `auth != null` et renvoie 401 à un visiteur anonyme (le
+    // téléphone), ce qui cassait l'affichage alors que le planning lui-même restait lisible.
+    await loadHistory()   // alimente le menu si l'historique est lisible (compte connecté), sinon {}
 
-    // Toujours afficher le planning le plus récemment publié à l'arrivée
-    // (les anciens plans restent accessibles via le menu latéral).
     const first = sortedPlans()[0]
-    const sk = first ? (first.shareKey || first.fbKey || String(first.planId)) : null
+    const sk = urlSk || (first ? (first.shareKey || first.fbKey || String(first.planId)) : null)
 
     if (!sk) { errState('Aucun planning publié trouvé.'); return }
 
@@ -380,10 +383,12 @@
     // Show UI
     document.getElementById('loadState').style.display = 'none'
     document.getElementById('frame').style.display = 'block'
-    menuToggle.style.display = 'flex'
-
-    // Lancer la sync temps-réel de l'historique
-    startHistoryStream()
+    // Le menu latéral n'a de sens que si l'historique est lisible (compte connecté).
+    // Sinon, le lien n'ouvre qu'un planning : on masque le bouton plutôt que montrer un menu vide.
+    if (sortedPlans().length > 0) {
+      menuToggle.style.display = 'flex'
+      startHistoryStream()   // sync temps-réel de l'historique (compte connecté)
+    }
   }
 
   init()
